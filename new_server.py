@@ -82,6 +82,14 @@ async def broadcast(message: str, sender_ws=None):
         await asyncio.gather(*[ws.send(message) for ws in targets], return_exceptions=True)
 
 async def ban_user(target_username: str, reason: str = "No reason"):
+    if target_username not in user_store:
+        log.warning(f"Attempted ban of unknown user: {target_username}")
+        return {"status": "not_found"}
+
+    # 2. Already banned
+    if target_username in banned_users:
+        return {"status": "already_banned"}
+    
     banned_users.add(target_username)
 
     # disconnect user if online
@@ -90,13 +98,14 @@ async def ban_user(target_username: str, reason: str = "No reason"):
             try:
                 await ws.send(json.dumps({
                     "type": "system",
-                    "text": f"🚫 You have been banned: {reason}"
+                    "text": f"🚫 You have been banned. Reason: {reason}"
                 }))
                 await ws.close()
             finally:
                 authenticated_clients.pop(ws, None)
 
     log.warning(f"BANNED: {target_username} | {reason}")
+    return {"status": "banned"}
 
 
 async def unban_user(target_username: str):
@@ -159,6 +168,7 @@ async def handle_client(websocket):
                         "type": "auth_fail",
                         "reason": "You are banned from this server"
                             })
+                    await websocket.close()
                     return
                 password = data.get("password", "").strip()
 
@@ -171,7 +181,7 @@ async def handle_client(websocket):
 
                     # Notify everyone
                     join_msg = json.dumps({"type": "system", "text": f"👋 {username} joined the chat"})
-                    await asyncio.gather(*[ws.send(join_msg) for ws in authenticated_clients], return_exceptions=True)
+                    await broadcast(join_msg)
                     await broadcast_user_list()
                 else:
                     log.warning(f"  ❌ Auth FAIL: '{username}' from {addr}")
@@ -207,7 +217,14 @@ async def handle_client(websocket):
                         continue
 
                     target = text.split(" ", 1)[1].strip()
-                    await ban_user(target, f"Banned by {username}")
+                    result = await ban_user(target, f"Banned by {username}")
+
+                    if result["status"] == "not_found":
+                        await send({"type": "error", "text": f"User '{target}' does not exist"})
+                    elif result["status"] == "already_banned":
+                        await send({"type": "error", "text": f"{target} is already banned"})
+                    else:
+                        await send({"type": "system", "text": f"🚫 {target} has been banned"})
                     continue
 
                 if text.startswith("/unban "):
