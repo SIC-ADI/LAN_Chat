@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LAN Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    /* ── Root variables ────────────────────────────── */
+    :root {
+      --bg:         #0d1117;
+      --panel:      #161b22;
+      --border:     #30363d;
+      --green:      #3fb950;
+      --green-dim:  #1a4a26;
+      --amber:      #e3b341;
+      --red:        #f85149;
+      --blue:       #58a6ff;
+      --muted:      #8b949e;
+      --text:       #e6edf3;
+      --text-dim:   #7d8590;
+      --radius:     8px;
+      --font-mono:  'JetBrains Mono', monospace;
+      --font-ui:    'Space Grotesk', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-mono);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Subtle grid overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(63,185,80,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(63,185,80,.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Scanline animation ──────────────────────────── */
+    @keyframes scanline {
+      0%   { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      left: 0; right: 0; top: 0;
+      height: 120px;
+      background: linear-gradient(transparent, rgba(63,185,80,.04), transparent);
+      animation: scanline 6s linear infinite;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Wrapper ─────────────────────────────────────── */
+    #app { position: relative; z-index: 1; width: 100%; max-width: 860px; padding: 16px; }
+
+    /* ── Header bar ──────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: var(--radius) var(--radius) 0 0;
+      background: var(--panel);
+    }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .dot-red   { background: #ff5f57; }
+    .dot-amber { background: #febc2e; }
+    .dot-green { background: #28c840; }
+    .header-title {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--green);
+      letter-spacing: 0.1em;
+    }
+    #connection-badge {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--muted);
+      transition: all .3s;
+    }
+    #connection-badge.connected   { color: var(--green); border-color: var(--green-dim); }
+    #connection-badge.error       { color: var(--red);   border-color: #4a1f1e; }
+
+    /* ── Main container ──────────────────────────────── */
+    .container {
+      border: 1px solid var(--border);
+      border-radius: 0 0 var(--radius) var(--radius);
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       LOGIN SCREEN
+    ═══════════════════════════════════════════════════ */
+    #login-screen {
+      padding: 48px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 32px;
+    }
+    .login-logo {
+      text-align: center;
+    }
+    .login-logo .logo-text {
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: .08em;
+    }
+    .login-logo .logo-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+      letter-spacing: .15em;
+    }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    .cursor { animation: blink 1s step-end infinite; color: var(--green); }
+
+    .login-form {
+      width: 100%;
+      max-width: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .field input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .field input:focus {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px rgba(63,185,80,.15);
+    }
+    .field input::placeholder { color: var(--text-dim); }
+
+    #login-error {
+      font-size: 12px;
+      color: var(--red);
+      text-align: center;
+      min-height: 18px;
+      transition: opacity .3s;
+    }
+
+    .btn {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      padding: 11px 20px;
+      border-radius: var(--radius);
+      border: none;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-primary {
+      background: var(--green);
+      color: #0d1117;
+    }
+    .btn-primary:hover  { background: #52d669; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(63,185,80,.3); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { background: var(--green-dim); color: var(--muted); cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 7px 14px;
+      font-size: 12px;
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+    /* ═══════════════════════════════════════════════════
+       CHAT SCREEN
+    ═══════════════════════════════════════════════════ */
+    #chat-screen {
+      display: none;
+      height: 580px;
+      flex-direction: row;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 200px;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .sidebar-header {
+      padding: 12px 14px;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    #user-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+    .user-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .user-item::before {
+      content: '';
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      flex-shrink: 0;
+    }
+    .user-item.you { color: var(--green); font-weight: 600; }
+    .user-item.you::before { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+    .sidebar-footer {
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #session-info {
+      font-size: 11px;
+      color: var(--muted);
+      word-break: break-all;
+    }
+
+    /* Chat pane */
+    .chat-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      scroll-behavior: smooth;
+    }
+    #log::-webkit-scrollbar { width: 6px; }
+    #log::-webkit-scrollbar-track { background: transparent; }
+    #log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Message line */
+    .msg-line {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      padding: 3px 0;
+      animation: fadeUp .2s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity:0; transform: translateY(6px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+    .msg-ts {
+      font-size: 10px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .msg-user {
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .msg-user.self  { color: var(--amber); }
+    .msg-user.other { color: var(--blue);  }
+    .msg-text { font-size: 13px; color: var(--text); word-break: break-word; }
+
+    /* System messages */
+    .msg-system {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      padding: 4px 0;
+      animation: fadeUp .2s ease;
+    }
+    .msg-system::before { content: '── '; }
+    .msg-system::after  { content: ' ──'; }
+
+    /* Input row */
+    .input-row {
+      display: flex;
+      gap: 0;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .input-prefix {
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      color: var(--green);
+      font-size: 14px;
+      font-weight: 700;
+      flex-shrink: 0;
+      border-right: 1px solid var(--border);
+    }
+    #msg {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      padding: 12px 16px;
+    }
+    #msg::placeholder { color: var(--text-dim); }
+    #sendBtn {
+      background: var(--green-dim);
+      border: none;
+      border-left: 1px solid var(--border);
+      color: var(--green);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 0 20px;
+      cursor: pointer;
+      transition: background .2s;
+      letter-spacing: .05em;
+    }
+    #sendBtn:hover { background: #223a2a; }
+    #sendBtn:active { background: var(--green); color: var(--bg); }
+
+    /* Admin reload button */
+    #reloadBtn {
+      display: none;
+      width: 100%;
+      font-size: 11px;
+    }
+
+    /* ── Utility ─────────────────────────────────────── */
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header bar ───────────────────────────── -->
+  <div class="header">
+    <div class="header-left">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-amber"></div>
+      <div class="dot dot-green"></div>
+      <span class="header-title">LAN_CHAT<span class="cursor">_</span></span>
+    </div>
+    <span id="connection-badge">● OFFLINE</span>
+  </div>
+
+  <!-- ── Main container ───────────────────────── -->
+  <div class="container">
+
+    <!-- ════════ LOGIN SCREEN ════════ -->
+    <div id="login-screen">
+      <div class="login-logo">
+        <div class="logo-text">&gt; LAN_CHAT</div>
+        <div class="logo-sub">SECURE LOCAL AREA NETWORK MESSAGING</div>
+      </div>
+
+      <div class="login-form">
+        <div class="field">
+          <label>Username</label>
+          <input id="username" type="text" placeholder="enter username" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input id="password" type="password" placeholder="enter password">
+        </div>
+        <div id="login-error"></div>
+        <button class="btn btn-primary" id="loginBtn">CONNECT →</button>
+      </div>
+
+      <div style="font-size:11px;color:var(--muted);text-align:center;">
+        Server: <span id="server-url-display" style="color:var(--text-dim)"></span>
+      </div>
+    </div>
+
+    <!-- ════════ CHAT SCREEN ════════ -->
+    <div id="chat-screen">
+
+      <!-- Sidebar: online users -->
+      <div class="sidebar">
+        <div class="sidebar-header">Online Users</div>
+        <div id="user-list"></div>
+        <div class="sidebar-footer">
+          <div id="session-info"></div>
+          <button class="btn btn-ghost" id="reloadBtn" title="Admin: reload users.xlsx on server">↻ Reload Users</button>
+          <button class="btn btn-ghost" id="logoutBtn">✕ Logout</button>
+        </div>
+      </div>
+
+      <!-- Chat pane -->
+      <div class="chat-pane">
+        <div id="log"></div>
+        <div class="input-row">
+          <div class="input-prefix" id="input-prefix">&gt;</div>
+          <input id="msg" type="text" placeholder="type a message and press Enter…" autocomplete="off" spellcheck="false">
+          <button id="sendBtn">SEND</button>
+        </div>
+      </div>
+
+    </div>
+  </div><!-- /.container -->
+
+</div><!-- /#app -->
+
+<script>
+  // ── ONLY CHANGE THIS LINE ────────────────────────────────────
+  const SERVER_URL = "ws://10.0.25.115:8765";
+  // ────────────────────────────────────────────────────────────
+
+  // ── DOM refs ─────────────────────────────────────────────────
+  const loginScreen   = document.getElementById("login-screen");
+  const chatScreen    = document.getElementById("chat-screen");
+  const usernameInput = document.getElementById("username");
+  const passwordInput = document.getElementById("password");
+  const loginBtn      = document.getElementById("loginBtn");
+  const loginError    = document.getElementById("login-error");
+  const logEl         = document.getElementById("log");
+  const msgInput      = document.getElementById("msg");
+  const sendBtn       = document.getElementById("sendBtn");
+  const badge         = document.getElementById("connection-badge");
+  const userListEl    = document.getElementById("user-list");
+  const sessionInfo   = document.getElementById("session-info");
+  const inputPrefix   = document.getElementById("input-prefix");
+  const reloadBtn     = document.getElementById("reloadBtn");
+  const logoutBtn     = document.getElementById("logoutBtn");
+
+  document.getElementById("server-url-display").textContent = SERVER_URL;
+
+  // ── Session state ─────────────────────────────────────────────
+  let currentUser  = sessionStorage.getItem("lan_chat_user")  || null;
+  let currentRole  = sessionStorage.getItem("lan_chat_role")  || null;
+  let ws           = null;
+  let pendingLogin = false;  // waiting for auth response
+
+  // ── Helpers ───────────────────────────────────────────────────
+  function timestamp() {
+    return new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function appendChat(fromUser, text, isSelf) {
+    const div = document.createElement("div");
+    div.className = "msg-line";
+    div.innerHTML = `
+      <span class="msg-ts">${timestamp()}</span>
+      <span class="msg-user ${isSelf ? "self" : "other"}">${escHtml(fromUser)}</span>
+      <span class="msg-text">${escHtml(text)}</span>`;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function appendSystem(text) {
+    const div = document.createElement("div");
+    div.className = "msg-system";
+    div.textContent = text;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  function setBadge(state) {
+    badge.className = state;
+    badge.textContent = state === "connected" ? "● CONNECTED" : state === "error" ? "● ERROR" : "● OFFLINE";
+  }
+
+  function renderUserList(users) {
+    userListEl.innerHTML = "";
+    users.forEach(u => {
+      const div = document.createElement("div");
+      div.className = "user-item" + (u === currentUser ? " you" : "");
+      div.textContent = u + (u === currentUser ? " (you)" : "");
+      userListEl.appendChild(div);
+    });
+  }
+
+  // ── WebSocket ─────────────────────────────────────────────────
+  function connectWS(afterOpen) {
+    if (ws && ws.readyState < 2) ws.close();
+
+    ws = new WebSocket(SERVER_URL);
+
+    ws.onopen = () => {
+      setBadge("connected");
+      if (afterOpen) afterOpen();
+    };
+
+    ws.onmessage = (event) => {
+      let data;
+      try { data = JSON.parse(event.data); }
+      catch { appendSystem("[System] Non-JSON message: " + event.data); return; }
+
+      switch (data.type) {
+
+        case "auth_ok":
+          // Save session
+          currentUser = data.username;
+          currentRole = data.role;
+          sessionStorage.setItem("lan_chat_user", currentUser);
+          sessionStorage.setItem("lan_chat_role", currentRole);
+          pendingLogin = false;
+          showChatScreen();
+          break;
+
+        case "auth_fail":
+          pendingLogin = false;
+          loginError.textContent = "⚠ " + (data.reason || "Authentication failed");
+          loginBtn.disabled = false;
+          loginBtn.textContent = "CONNECT →";
+          ws.close();
+          break;
+
+        case "chat":
+          appendChat(data.from, data.text, data.from === currentUser);
+          break;
+
+        case "system":
+          appendSystem(data.text);
+          break;
+
+        case "user_list":
+          renderUserList(data.users || []);
+          break;
+
+        case "error":
+          appendSystem("⚠ " + data.text);
+          break;
+      }
+    };
+
+    ws.onclose = () => {
+      setBadge("offline");
+      if (chatScreen.style.display !== "none") {
+        appendSystem("Connection closed. Refresh to reconnect.");
+      }
+    };
+
+    ws.onerror = () => {
+      setBadge("error");
+      if (pendingLogin) {
+        loginError.textContent = "⚠ Cannot reach server. Check IP/port.";
+        loginBtn.disabled = false;
+        loginBtn.textContent = "CONNECT →";
+        pendingLogin = false;
+      }
+    };
+  }
+
+  // ── Login flow ────────────────────────────────────────────────
+  function doLogin() {
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value.trim();
+
+    if (!username || !password) {
+      loginError.textContent = "⚠ Enter username and password";
+      return;
+    }
+    loginError.textContent = "";
+    loginBtn.disabled = true;
+    loginBtn.textContent = "CONNECTING…";
+    pendingLogin = true;
+
+    connectWS(() => {
+      // Send login as first message after socket opens
+      ws.send(JSON.stringify({ type: "login", username, password }));
+    });
+  }
+
+  loginBtn.addEventListener("click", doLogin);
+  passwordInput.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  usernameInput.addEventListener("keydown", e => { if (e.key === "Enter") passwordInput.focus(); });
+
+  // ── Show chat screen ──────────────────────────────────────────
+  function showChatScreen() {
+    loginScreen.style.display = "none";
+    chatScreen.style.display  = "flex";
+    sessionInfo.textContent   = `@${currentUser} · ${currentRole}`;
+    inputPrefix.textContent   = `${currentUser} >`;
+    if (currentRole === "admin") reloadBtn.style.display = "block";
+    logEl.innerHTML = "";
+    appendSystem(`Logged in as ${currentUser} (${currentRole})`);
+    msgInput.focus();
+  }
+
+  // ── Logout ────────────────────────────────────────────────────
+  logoutBtn.addEventListener("click", () => {
+    sessionStorage.removeItem("lan_chat_user");
+    sessionStorage.removeItem("lan_chat_role");
+    currentUser = null; currentRole = null;
+    if (ws) ws.close();
+    chatScreen.style.display  = "none";
+    loginScreen.style.display = "flex";
+    passwordInput.value = "";
+    loginError.textContent = "";
+    loginBtn.disabled = false;
+    loginBtn.textContent = "CONNECT →";
+    setBadge("offline");
+  });
+
+  // ── Send chat message ─────────────────────────────────────────
+  function sendMessage() {
+    const text = msgInput.value.trim();
+    if (!text) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      appendSystem("Not connected – cannot send message");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "message", text }));
+    msgInput.value = "";
+    msgInput.focus();
+  }
+
+  sendBtn.addEventListener("click", sendMessage);
+  msgInput.addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
+
+  // ── Admin: reload Excel ───────────────────────────────────────
+  reloadBtn.addEventListener("click", () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "reload" }));
+    }
+  });
+
+  // ── Auto-resume session if stored ────────────────────────────
+  // (Session is in sessionStorage so it expires when tab closes)
+  // We still need to re-authenticate on page refresh, so we just
+  // pre-fill the username field as a convenience.
+  if (currentUser) {
+    usernameInput.value = currentUser;
+    passwordInput.focus();
+  }
+</script>
+</body>
+</html>
